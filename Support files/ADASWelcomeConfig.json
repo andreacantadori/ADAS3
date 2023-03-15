@@ -1,0 +1,11 @@
+{
+    "ROILeft":                                      "0.1",
+    "ROIRight":                                     "0.9",
+    "ROITop":                                       "0.3",
+    "ROIBottom":                                    "0.8",
+    "MinTargetDistance":                            "1200",
+    "MaxTargetDistance":                            "1500",
+    "LicensePlateHeight":                           "100",
+    "LicensePlateWidth":                            "260",
+    "MinPlateImageSizeInPixelsForDecoding":         "300"
+}
