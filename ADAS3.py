@@ -3,29 +3,26 @@ import numpy as np
 from time import time
 import camera
 import sys
-import Utilities
+import utilities
 from numpy import load
 from numpy import save
 from numpy import asarray
 
+
+
 calibrateXd = False
 
-builtinCamera = False
-
-realTarget = Utilities.initPlateVertexes(135,135,0)
+realTarget = utilities.initPlateVertexes(135,135,0)
 detectedTarget = np.zeros((4,2), dtype=np.float32)
 
 runLoop = True
 
-if builtinCamera:
-    cap = cv2.VideoCapture(0)
-else:
-    cam = camera.Camera(4024,3036)
-    cam.start()
-    cv2.waitKey(500)
-    frame = cam.latestFrame
-    if frame is None:
-        sys.exit(1)
+cam = camera.Camera(4024,3036)
+cam.start()
+cv2.waitKey(500)
+frame = cam.latestFrame
+if frame is None:
+    sys.exit(1)
 
 # Lists of all circles and squares detected
 circles = []
@@ -38,6 +35,12 @@ targets = []
 plateCenter_Xw = np.zeros((4,1), dtype=np.float32)
 plateCenter_Xw[3] = 1
 
+p1 = np.zeros((4,1), dtype=np.float32)
+p1[0] = -67
+p1[1] = 0
+p1[2] = 0
+p1[3] = 1
+
 M_K = load('./Support files/Camera/CameraMtx.npy')
 print('M_K\n',M_K)
 M_DIST = load('./Support files/Camera/CameraDist.npy')
@@ -48,15 +51,11 @@ print('M_Dinv\n',M_DInv)
 
 while runLoop:
 
-    if builtinCamera:
-        _, image = cap.read()
-        imageGray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
-    else:
-        imageGray = cam.latestFrame
-        if imageGray is None:
-            sys.exit(1)
+    imageGray = cam.latestFrame
+    if imageGray is None:
+        sys.exit(1)
 
-    _, imageBW = cv2.threshold(imageGray, 50, 255, 0)
+    _, imageBW = cv2.threshold(imageGray, 80, 255, 0)
     # Find all contours in the image
     contours, _ = cv2.findContours(imageBW, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
     circles.clear()
@@ -71,11 +70,11 @@ while runLoop:
                 square = [approx, x, y, w, h, area]
                 squares.append(square)
         elif len(approx) >= 8 and cv2.isContourConvex(approx) and area > 1000:
-    	    M = cv2.moments(contour)
-    	    x = int(round(M["m10"]/M["m00"]))
-    	    y = int(round(M["m01"]/M["m00"]))
-    	    circle = [contour, x, y, area]
-    	    circles.append(circle)
+            M = cv2.moments(contour)
+            x = int(round(M["m10"]/M["m00"]))
+            y = int(round(M["m01"]/M["m00"]))
+            circle = [contour, x, y, area]
+            circles.append(circle)
     winner = None
     for s in squares:
         targets.clear()
@@ -93,14 +92,19 @@ while runLoop:
     if winner is not None:
         i = 0
         for p in winner[0]:
-            cv2.circle(imageGray,(p[0][0],p[0][1]),50,i*63,-1)
             detectedTarget[i][0] = p[0][0]
             detectedTarget[i][1] = p[0][1]
             i = i+1
+        detectedTarget = utilities.orderPoints(detectedTarget)
+        i = 0
+        for p in detectedTarget:
+            cv2.circle(imageGray,(p[0],p[1]),50,255,-1)
+            cv2.putText(imageGray, "{:.0f}".format(i), (p[0],p[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+            i = i+1
         if calibrateXd:
-            tmpTarget = Utilities.initPlateVertexes(135,135,350)
-            _, rVec, tVec = cv2.solvePnP(tmpTarget, np.float32(detectedTarget), M_K, M_DIST, cv2.SOLVEPNP_P3P)
-            M = Utilities.buildRototranslationMatrix(rVec, tVec)
+            tmpTarget = utilities.initPlateVertexes(135,135,350)
+            _, rVec, tVec = cv2.solvePnP(tmpTarget, np.float32(detectedTarget), M_K, M_DIST, cv2.SOLVEPNP_ITERATIVE)
+            M = utilities.buildRototranslationMatrix(rVec, tVec)
             M_DInv = np.linalg.inv(M)
             save( './Support files/Camera/M_DInv', asarray(M_DInv))
             print("<<<< CALIBRATION MATRIX >>>")
@@ -110,12 +114,19 @@ while runLoop:
             # Solve the projection problem by looking for the rotation
             # and translation vectors from word (3D) to screen (2D) coordinate
             _, rVec, tVec = cv2.solvePnP(realTarget, np.float32(detectedTarget), M_K, M_DIST, cv2.SOLVEPNP_P3P)
-            M = Utilities.buildRototranslationMatrix(rVec, tVec)
+            M = utilities.buildRototranslationMatrix(rVec, tVec)
+            centerTarget = np.zeros((1,3), np.float32)
+            projectedTarget, _ =  cv2.projectPoints(centerTarget, rVec, tVec, M_K, M_DIST) 
+            for p in projectedTarget:
+                cv2.circle(imageGray,(int(p[0][0]),int(p[0][1])),30,0,-1)
+
             # By applying the rototranslation, we get its camera coordinates
-            Mtot = np.matmul(M_DInv,M)
-            plateCenter_Xd = np.matmul(Mtot, plateCenter_Xw)[:,0]
+            #Mtot = np.matmul(M_DInv,M)
+            #plateCenter_Xd = np.matmul(Mtot, plateCenter_Xw)[:,0]
             #plateCenter_Xd[2] *= -1
-            cv2.putText(imageGray, "{:.0f} {:.0f} {:.0f}".format(plateCenter_Xd[0],plateCenter_Xd[1],plateCenter_Xd[2]), (100,100), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+            #cv2.putText(imageGray, "{:.0f} {:.0f} {:.0f}".format(plateCenter_Xd[0],plateCenter_Xd[1],plateCenter_Xd[2]), (100,100), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)               
+            print(tVec)
+            cv2.putText(imageGray, "{:.0f} {:.0f} {:.0f}".format(tVec[0][0],tVec[1][0],tVec[2][0]), (100,100), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
     cv2.line(imageGray,(0,1518),(4024,1518),255,3)
     cv2.line(imageGray,(2012,0),(2012,3036),255,3)
     cv2.imshow('Window',imageGray)
@@ -123,7 +134,7 @@ while runLoop:
 
     
     k = cv2.waitKey(10)
-    if k == 27:
+    if k == utilities.Key.ESC:
         runLoop = False
 
 cam.close()

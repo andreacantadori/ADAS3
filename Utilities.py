@@ -10,6 +10,30 @@ class Key:
 #====================================================
 import cv2
 import numpy as np
+from scipy.spatial import distance as dist
+
+#-------------------------------------------------
+def orderPoints(pts):
+#-------------------------------------------------
+    # sort the points based on their x-coordinates
+    xSorted = pts[np.argsort(pts[:, 0]), :]
+    # grab the left-most and right-most points from the sorted x-roodinate points
+    leftMost = xSorted[:2, :]
+    rightMost = xSorted[2:, :]
+    # now, sort the left-most coordinates according to their y-coordinates
+    # so we can grab the top-left and bottom-left points, respectively
+    leftMost = leftMost[np.argsort(leftMost[:, 1]), :]
+    (topLeft, bottomLeft) = leftMost
+    # now that we have the top-left coordinate, use it as an
+    # anchor to calculate the Euclidean distance between the
+    # top-left and right-most points; by the Pythagora
+    # theorem, the point with the largest distance will be
+    # our bottom-right point
+    D = dist.cdist(topLeft[np.newaxis], rightMost, "euclidean")[0]
+    (bottomRight, topRight) = rightMost[np.argsort(D)[::-1], :]
+    # return the coordinates in top-left, top-right,
+    # bottom-right, and bottom-left order
+    return np.intp([topLeft, topRight, bottomRight, bottomLeft])
 
 #----------------------------------------------------
 def buildRototranslationMatrix(r, t):
