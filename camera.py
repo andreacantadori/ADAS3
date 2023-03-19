@@ -24,6 +24,9 @@ class Camera:
         self.camera.Height.SetValue(self.height)
         self.camera.CenterX.SetValue(True)
         self.camera.CenterY.SetValue(True)
+        # =======>>>>> TODO: set the automatic gain mode
+        # ... I could not find the corresponding command... The only way so far is to use Pylon Viewer...
+        # self.camera.GainAuto.SetValue(GainAuto_Continuous)
         self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         self.converter = pylon.ImageFormatConverter()
         self.converter.OutputPixelFormat = pylon.PixelType_Mono8
