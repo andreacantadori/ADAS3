@@ -7,6 +7,7 @@ import utilities
 from numpy import load
 from numpy import save
 from numpy import asarray
+import server
 
 #--------------------------------------------------------------------------------------------------
 def showVertexes(img, show):
@@ -99,8 +100,8 @@ targets = []
 # whenever the target cannot be detected. 
 lightThreshold = None
 
-#myServer = server.httpServerRequestHandler()
-#myServer.run()
+myServer = server.intercom()
+myServer.startServer()
 
 runLoop = True
 while runLoop:
@@ -179,6 +180,7 @@ while runLoop:
         lightThreshold = int(lightThreshold * 0.9)
         if lightThreshold <= 1:
             lightThreshold = None
+        myServer.sendOutput('-,-,-')
     else:
         # Finally we have a targetDetected: our target in the image!
         # The targetDetected is a square, defined by its 4 vertexes. For the projection algorithm to work properly,
@@ -219,6 +221,7 @@ while runLoop:
             pitch_deg = -pitch_deg -180
         yaw_deg = np.rad2deg(yaw)
         showAngles(imageGray, (roll_deg,pitch_deg,yaw_deg), (100,250), True)
+        myServer.sendOutput('{:.0f},{:.0f},{:.0f}'.format(x,y,z))
     showCross(imageGray, True)
     cv2.imshow('Window',imageGray)
     k = cv2.waitKey(10)
