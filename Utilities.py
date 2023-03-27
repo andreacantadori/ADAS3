@@ -1,9 +1,17 @@
+
 class Key:
     # ASCII codes
     ESC   = 27
     SPACE = 32
+    E     = 69
+    e     = 101
     R     = 82
-    r     = 114
+    S     = 83
+    s     = 115
+    T     = 84
+    t     = 116
+    V     = 86
+    v     = 118
     
 #====================================================
 # Graphic utilities
@@ -78,28 +86,41 @@ def roi2FrameCoordinates(rect, roi):
     rect[3][1] += roi[0][1]
     return rect
     
-#----------------------------------------------------
-def initPlateVertexes(w, h, d):
+def buildRealTarget(w, h, d):
 # Returns the vertexes of the license plate in license plate coordinates
 # starting from the top left point and proceding clockwise
 #----------------------------------------------------
-    m = np.zeros((4,3), np.float32)
+    m = np.zeros((5,3), np.float32)
     
-    m[0][0] = - w / 2
-    m[0][1] =   h / 2
-    m[0][2] =   d 
+    m[0,0] = - w / 2
+    m[0,1] =   h / 2
+    m[0,2] =   d 
     
-    m[1][0] =   w / 2 
-    m[1][1] =   h / 2 
-    m[1][2] =   d 
+    m[1,0] =   w / 2 
+    m[1,1] =   h / 2 
+    m[1,2] =   d 
     
-    m[2][0] =   w / 2 
-    m[2][1] = - h / 2 
-    m[2][2] =   d 
+    m[2,0] =   w / 2 
+    m[2,1] = - h / 2 
+    m[2,2] =   d 
     
-    m[3][0] = - w / 2 
-    m[3][1] = - h / 2 
-    m[3][2] =   d     
+    m[3,0] = - w / 2 
+    m[3,1] = - h / 2 
+    m[3,2] =   d     
+
+    m[4,0] = 0
+    m[4,1] = 0
+    m[4,2] = 0
     
     return m
 
+#--------------------------------------------------------
+# FILE UTILITIES
+#--------------------------------------------------------
+def sharePosition(n,x,y,z,r,p,w):
+    file = open('xchgFile.txt', 'w')
+    if x is None:
+        file.write('#{:.0f} (-,-,-),(-,-,-)\n'.format(n))
+    else:
+        file.write('#{:.0f} ({:.0f},{:.0f},{:.0f}),({:.1f},{:.1f},{:.1f})'.format(n,x,y,z,r,p,w))
+    file.close()

@@ -7,16 +7,44 @@ import utilities
 from numpy import load
 from numpy import save
 from numpy import asarray
-import server
 
 #--------------------------------------------------------------------------------------------------
-def showVertexes(img, show):
+def getTargetVertexesInClockwiseOrder(t):
+#--------------------------------------------------------------------------------------------------
+    pts = np.zeros((4,2), dtype=np.float32)
+    i = 0
+    for p in t[0]:
+        pts[i,0] = p[0,0]
+        pts[i,1] = p[0,1]
+        i = i+1
+    return utilities.orderPoints(pts)
+
+#--------------------------------------------------------------------------------------------------
+def isCircleInscribedInSquare(circle, square):
+    w = square[3]
+    h = square[4]
+    sX = square[1] + int(w/2)
+    sY = square[2] + int(h/2)
+    l = int((w+h)/2)
+    d = circle[4] * 2    # Diameter
+    x = circle[1]
+    y = circle[2]
+    # Check if the diameter of the circle is equal to 0.8 times the side of the square (+/- a tolerance)
+    # and check if the center of the circle is "quite" close to the center of the square
+    if d<l*0.8*1.1 and d>l*0.8*0.9 and abs(x-sX)<100 and abs(y-sY)<100:
+        res = True
+    else:
+        res = False
+    return res    
+
+#--------------------------------------------------------------------------------------------------
+def showVertexes(img, target, show):
 #--------------------------------------------------------------------------------------------------
     if show:
         i = 0
-        for p in detectedTarget:
-            cv2.circle(img,(p[0],p[1]),50,255,-1)
-            cv2.putText(img, "{:.0f}".format(i), (p[0]-25,p[1]+25), cv2.FONT_HERSHEY_SIMPLEX, 2, 0, 4, cv2.LINE_4)
+        for p in target:
+            cv2.circle(img,(p[0],p[1]),5,255,-1)
+            cv2.putText(img, "{:.0f}".format(i), (p[0],p[1]), cv2.FONT_HERSHEY_SIMPLEX, 2, 255, 4, cv2.LINE_4)
             i = i+1
     return img
 #--------------------------------------------------------------------------------------------------
@@ -27,10 +55,13 @@ def showCenter(img, pts, show):
             cv2.circle(img,(int(p[0][0]),int(p[0][1])),30,0,-1)
     return img
 #--------------------------------------------------------------------------------------------------
-def showCoordinates(img, coord, pos, show):
+def showCoordinates(img, coord, pos, sbp, show):
 #--------------------------------------------------------------------------------------------------
     if show:
-        cv2.putText(img, "X,Y,Z (mm): {:.0f},{:.0f},{:.0f}".format(coord[0],coord[1],coord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+        if sbp:
+            cv2.putText(img, "X,Y,Z (mm): {:.0f},{:.0f},{:.0f}, subpixel".format(coord[0],coord[1],coord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+        else:
+            cv2.putText(img, "X,Y,Z (mm): {:.0f},{:.0f},{:.0f}".format(coord[0],coord[1],coord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
     return img
 #--------------------------------------------------------------------------------------------------
 def showAngles(img, angles, pos, show):
@@ -52,35 +83,74 @@ def showThreshold(img, thresh, pos, show):
         cv2.putText(img, "Thresh: {:.0f}".format(thresh), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
     return img
 
+#--------------------------------------------------------------------------------------------------
+def subpixelAnalysis(img,corners):
+#--------------------------------------------------------------------------------------------------
+    # Set the needed parameters to find the refined corners
+    winSize = (5, 5)
+    zeroZone = (-1, -1)
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TermCriteria_COUNT, 40, 0.001)
+    # Convert corners (4x2 matrix) to expected input format (4x1x2 matrix) - this is required by Numpy libs
+    c = np.zeros((4,1,2), np.float32)
+    for i in range(4):
+        c[i,0,0] = corners[i,0]
+        c[i,0,1] = corners[i,1]
+    # Calculate the refined corner locations
+    c = np.int16(cv2.cornerSubPix(img, c, winSize, zeroZone, criteria))
+    # Switching back to the original (4x2) format
+    result = np.zeros((4,2),np.int16)
+    for i in range(4):
+        result[i,0] = c[i,0,0]
+        result[i,1] = c[i,0,1]
+    return result
+
+#--------------------------------------------------------------------------------------------------
+# MAIN PROGRAM STARTS HERE
+#--------------------------------------------------------------------------------------------------
+
 # Graphic options
-graphicsShowVertexes = False
+graphicsShowVertexes = False    # Set to True to show vertexes
+graphicShowCross = False        # Call with True to display the white cross centered in the image
 
 # Load camera intrinsic matrix
 M_K = load('./Support files/Camera/CameraMtx.npy')
 # Load camera distortion matrix
 M_DIST = load('./Support files/Camera/CameraDist.npy')
-print('M_DIST\n',M_DIST)
-# ========>>>> TO DO: Manage the cases of missing matrixes!
+# ========>>>> TODO: Manage the cases of missing matrixes!
 
-# The real (i.e. in world coordinates) is a square of 174x174 mm
+# The real (i.e. in world coordinates) is a square of 200x200 mm
 # ========>>>> ADJUST THESE SIZES AS APPROPRIATE!
 # Note that the z-coordinate in the real target's coordinate system is 0
-# See initPlateVertexes for more details
-realTarget = utilities.initPlateVertexes(174,174,0)
-
-# Ratio between the areas of the target square and its inner circle
-#kSC = 2.87  # Target M1
-kSC = 1.99  # Target M2
-kSCTolerance = 0.2  
-kSCMin = kSC * (1-kSCTolerance)
-kSCMax = kSC * (1+kSCTolerance)
+# See buildRealTarget for more details
+realTarget = utilities.buildRealTarget(200,200,0)
 
 # The detected target, as displayed on the 2D screen, is an array of 4 (x,y) points
 detectedTarget = np.zeros((4,2), dtype=np.float32)
+# The complete target consists of the 4 vertexes of the square plus the center of the detected circle
+# It is therefore an array of 5 (x,y) points
+# The addition of the circle center adds significant more stability to the projection algorithm (solvePnP):
+# in fact, if the camera is not exactly focused on the target (which is impossible), the contour of the square is not a clear B/W transition,
+# but a gray shaded area; because of binarization, the size of this area depends on the threshold (at least to some extent): in other
+# words, the solution of the solvePnP algorithm slightly depends on the binarization threshold, too.
+# By adding a 5-th point, i.e. the center of the circle (which is invariant to the choosen threshold, at least at first approximation),
+# the solution of the projection algorithm is less affected by the threshold
+extendedTarget = np.zeros((5,2), dtype=np.float32)
+
+# OUTPUT CUSTOMIZAZION
+# Enable or disable subpixel analysis
+subpixelAnalysysEnabled = True
+# Enable or disable display of target vertexes
+showVertexesEnabled = True
+# Enable or disable coordinate printout as image overlay
+showCoordinatesEnable = True
+# Enable or disable lowpass filtering of (x,y,z) coordinagtes
+filterCoordinatesEnable = True
+# (x,y,z) coordinates low pass filter constant
+# Just ignore if filterCoordinatesEnable is False
+alfa = 0.2
 
 # Create camera object (encapsulates pypylon) and set the camera to its maximum resolution
 cam = camera.Camera(4024,3036)
-
 # Start grabbing
 # Note that the camera.latestFrame method is asynchronous, i.e. it always
 # returns the latest available frame, so that image grabbing continues 
@@ -100,8 +170,24 @@ targets = []
 # whenever the target cannot be detected. 
 lightThreshold = None
 
-myServer = server.intercom()
-myServer.startServer()
+nFrame = 0
+xchgFile = open('xcghFile.txt','w')
+xchgFile.close()
+
+avgX = 0
+avgY = 0 
+avgZ = 0
+avgRoll = 0
+avgPitch = 0 
+avgYaw = 0
+
+print('---------------------------------')
+print('              ADAS3')
+print('---------------------------------')
+print('Interactive line commands:')
+print('     V/v: enable/disable display of target vertexes')
+print('     S/s: enable/disable subpixel analysis')
+print('     ESC: exit program')
 
 runLoop = True
 while runLoop:
@@ -147,86 +233,126 @@ while runLoop:
         #       - it is convex
         # As usual, we discard too small contours
         elif len(approx) > 8 and cv2.isContourConvex(approx) and area > 1000:
-            # Don't care much about the lines below: it is OpenCV's method to find the center of mass of
-            # the contour, which we assume as the center of the circle
-            M = cv2.moments(contour)
-            x = int(round(M["m10"]/M["m00"]))
-            y = int(round(M["m01"]/M["m00"]))
+            # A circle was detected: let's find its center and radius
+            (x,y),radius = cv2.minEnclosingCircle(approx)
             # Append the circle and its properties to the list
-            circles.append([contour, x, y, area])
-    targetDetected = None
+            circles.append([approx, x, y, area, radius])
+    maybeTarget = None
+    circleCenter = None
     for s in squares:
         targets.clear()
         # If a circle lays inside a square, and its area is 2.87 (+/- a tolerance) times 
         # smaller than that of the square, then that square is a candidate to be our target
         for c in circles:
-            if c[1] > s[1] and c[1] < s[1]+s[3] and c[2] > s[2] and c[2] < s[2]+s[4] and s[5] < c[3]*kSCMax and s[5] > c[3]*kSCMin:
+            if isCircleInscribedInSquare(c,s):
                 targets.append(c)
-        # If the square contains exactly 1 circle, it is candidate targetDetected
+        # If the square contains exactly 1 circle, it is candidate maybeTarget
         if len(targets) == 1:
-            if targetDetected is None:
-                targetDetected = s
+            if maybeTarget is None:
+                maybeTarget = s
             else:
-                # If a targetDetected was already nominated, and the new candidate has smaller area than it,
-                # then the new candidate becomes the targetDetected
+                # If a maybeTarget was already nominated, and the new candidate has smaller area than it,
+                # then the new candidate becomes the maybeTarget
                 # In other words: we choose the smallest square which contains one and only one circle
-                # whose area is 2.87 times smaller than that of the square
-                if s[4] < targetDetected[4]:
-                    targetDetected = s
-    if targetDetected is None:
-        # We could not find any targetDetected, i.e. any target
+                if s[4] < maybeTarget[4]:
+                    maybeTarget = s
+            circleCenter = (targets[0][1],targets[0][2])
+    if maybeTarget is None:
+        # We could not find any maybeTarget, i.e. any target
         # Therefore we adjust our binary threshold by lowering it by 10% and retry...
         # Once the threshold is too low, we restart from the beginning
         lightThreshold = int(lightThreshold * 0.9)
         if lightThreshold <= 1:
             lightThreshold = None
-        myServer.sendOutput('-,-,-')
+            utilities.sharePosition(nFrame,None,None,None,None,None,None)
     else:
-        # Finally we have a targetDetected: our target in the image!
-        # The targetDetected is a square, defined by its 4 vertexes. For the projection algorithm to work properly,
+        # Finally we have a maybeTarget: our target in the image!
+        # The maybeTarget is a square, defined by its 4 vertexes. For the projection algorithm to work properly,
         # we need that the vertexes of the square are ordered always the same way, e.g. the first being the 
         # top left, the second the top right, and so on moving clockwise. 
         # This is what is done by the orderPoints() method
-        i = 0
-        for p in targetDetected[0]:
-            detectedTarget[i][0] = p[0][0]
-            detectedTarget[i][1] = p[0][1]
-            i = i+1
-        detectedTarget = utilities.orderPoints(detectedTarget)
+        detectedTarget = getTargetVertexesInClockwiseOrder(maybeTarget)
+        if subpixelAnalysysEnabled:
+            detectedTarget = subpixelAnalysis(imageGray,detectedTarget)
         # Call showVertexes(_,True) to highlight the vertexes in the image
-        imageGray = showVertexes(imageGray, True) 
+        imageGray = showVertexes(imageGray, detectedTarget, showVertexesEnabled) 
         # Solve the projection problem by looking for the rotation
         # and translation vectors from word (3D) to screen (2D) coordinate
-        _, rVec, tVec = cv2.solvePnP(realTarget, np.float32(detectedTarget), M_K, M_DIST, cv2.SOLVEPNP_P3P)
-        # rVec is the (3x1) rotation vector 
-        # tVec is the (3x1) translation vector 
-        x = tVec[0][0]
-        y = tVec[1][0]
-        z = tVec[2][0]
-        showCoordinates(imageGray, (x,y,z), (100,100), True)
+        extendedTarget[0] = detectedTarget[0]
+        extendedTarget[1] = detectedTarget[1]
+        extendedTarget[2] = detectedTarget[2]
+        extendedTarget[3] = detectedTarget[3]
+        extendedTarget[4,0] = circleCenter[0]
+        extendedTarget[4,1] = circleCenter[1]
+        _, rVec, tVec = cv2.solvePnP(realTarget, np.float32(extendedTarget), M_K, M_DIST, cv2.SOLVEPNP_P3P)
+        # rVec is the (4x1) rotation vector (quaternion)
+        # tVec is the (3x1) translation vector, corresponding to the displacement of the center
+        # of the real target in the camera coordinate system
+        x = tVec[0,0]
+        y = tVec[1,0]
+        z = tVec[2,0]
+        # Some lowpass filtering...
+        if filterCoordinatesEnable:
+            avgX = x * alfa + (1-alfa) * avgX
+            avgY = y * alfa + (1-alfa) * avgY
+            avgZ = z * alfa + (1-alfa) * avgZ
+        else:
+            avgX = x
+            avgY = y
+            avgZ = z
+        showCoordinates(imageGray, (avgX,avgY,avgZ), (100,100), subpixelAnalysysEnabled, showCoordinatesEnable)
         # Calculate the pitch, yaw, and roll angles
         # Pitch is rotation around x-axis, yaw is rotation around y-axis, and roll is rotation around z-axis
-        rot_mat = cv2.Rodrigues(rVec)
-        r = rot_mat[0]
-        print(r)
-        roll = np.arctan2(r[1, 0], r[0, 0])
-        pitch = np.arctan2(r[2, 1], r[2, 2])
-        yaw = np.arctan2(-r[2, 0], np.sqrt(r[2, 1]**2 + r[2, 2]**2))
+        # Step 1: convert the quaternion to a (3x3) rotation matrix
+        rotMat = cv2.Rodrigues(rVec)[0]
+        # Step 2: calculate roll, pitch, yaw from rotation matrix
+        roll_rad = np.arctan2(rotMat[1, 0], rotMat[0, 0])
+        pitch_rad = np.arctan2(rotMat[2, 1], rotMat[2, 2])
+        yaw_rad = np.arctan2(-rotMat[2, 0], np.sqrt(rotMat[2, 1]**2 + rotMat[2, 2]**2))
         # Convert the angles from radians to degrees
-        roll_deg = np.rad2deg(roll)
-        pitch_deg = np.rad2deg(pitch)
+        roll_deg = np.rad2deg(roll_rad)
+        pitch_deg = np.rad2deg(pitch_rad)
         if pitch_deg > 0:
             pitch_deg = 180 - pitch_deg
         else:
             pitch_deg = -pitch_deg -180
-        yaw_deg = np.rad2deg(yaw)
-        showAngles(imageGray, (roll_deg,pitch_deg,yaw_deg), (100,250), True)
-        myServer.sendOutput('{:.0f},{:.0f},{:.0f}'.format(x,y,z))
-    showCross(imageGray, True)
+        yaw_deg = np.rad2deg(yaw_rad)
+        # Some lowpass filtering...
+        avgRoll = roll_deg * alfa + (1-alfa) * avgRoll
+        avgYaw = yaw_deg * alfa + (1-alfa) * avgYaw
+        avgPitch = pitch_deg * alfa + (1-alfa) * avgPitch
+        showAngles(imageGray, (avgRoll,avgPitch,avgYaw), (100,250), True)
+        # Output real-time position information for other apps
+        utilities.sharePosition(nFrame,avgX,avgY,avgZ,avgRoll,avgPitch,avgYaw)
+    
+    # Graphic output... 
+    showCross(imageGray, graphicShowCross) 
     cv2.imshow('Window',imageGray)
+    nFrame = nFrame + 1
     k = cv2.waitKey(10)
     if k == utilities.Key.ESC:
         runLoop = False
+    elif k == utilities.Key.S:
+        subpixelAnalysysEnabled = True
+        print('>>> Subpixel analysis enabled')
+    elif k == utilities.Key.s:
+        subpixelAnalysysEnabled = False
+        print('>>> Subpixel analysis disabled')
+    elif k == utilities.Key.V:
+        showVertexesEnabled = True
+        print('>>> Show vertexes enabled')
+    elif k == utilities.Key.T:
+        lightThreshold = lightThreshold + 1
+        print('lightThreshold', lightThreshold)
+    elif k == utilities.Key.t:
+        lightThreshold = lightThreshold - 1
+        print('lightThreshold', lightThreshold)
+    elif k == utilities.Key.v:
+        showVertexesEnabled = False
+        print('>>> Show vertexes disabled')
+
+
+# Close everything and shut down
 cam.stop()
 cv2.waitKey(1000)
 cam.close()
