@@ -112,7 +112,6 @@ def subpixelAnalysis(img,corners):
 #--------------------------------------------------------------------------------------------------
 def main():
     # Graphic options
-    graphicsShowVertexes = False    # Set to True to show vertexes
     graphicShowCross = False        # Call with True to display the white cross centered in the image
 
     # Load camera intrinsic matrix
@@ -153,14 +152,25 @@ def main():
     alfa = 0.1
 
     # Create camera object (encapsulates pypylon) and set the camera to its maximum resolution
-    cam = camera.Camera(4024,3036)
+    cameraLeft = camera.Camera('24686208',4024,3036)
     # Start grabbing
     # Note that the camera.latestFrame method is asynchronous, i.e. it always
     # returns the latest available frame, so that image grabbing continues 
     # even during image transfer via USB
-    cam.start()
+    cameraLeft.start()
     cv2.waitKey(500)
-    if cam.latestFrame is None:
+    if cameraLeft.latestFrame is None:
+        sys.exit(1)
+
+    # Create camera object (encapsulates pypylon) and set the camera to its maximum resolution
+    cameraRight = camera.Camera('24686187',4024,3036)
+    # Start grabbing
+    # Note that the camera.latestFrame method is asynchronous, i.e. it always
+    # returns the latest available frame, so that image grabbing continues 
+    # even during image transfer via USB
+    cameraRight.start()
+    cv2.waitKey(500)
+    if cameraRight.latestFrame is None:
         sys.exit(1)
 
     # Lists of all circles, squares and target candidates detected in the image
@@ -171,18 +181,20 @@ def main():
     # Threshold for binary image thresholding
     # We implement a dinamic thresholding algorithm, by adjusting the threshold
     # whenever the target cannot be detected. 
-    lightThreshold = None
+    lightThreshold = [None,None]
 
-    nFrame = 0
-    xchgFile = open('xcghFile.txt','w')
-    xchgFile.close()
+    nFrame = [0,0]
+    xchgFileLeft = open('xcghFileLeft.txt','w')
+    xchgFileLeft.close()
+    xchgFileRight = open('xcghFileRight.txt','w')
+    xchgFileRight.close()
 
-    avgX = 0
-    avgY = 0 
-    avgZ = 0
-    avgRoll = 0
-    avgPitch = 0 
-    avgYaw = 0
+    avgX = [0,0]
+    avgY = [0,0] 
+    avgZ = [0,0]
+    avgRoll = [0,0]
+    avgPitch = [0,0]
+    avgYaw = [0,0]
 
     print('---------------------------------')
     print('              ADAS3')
@@ -195,7 +207,21 @@ def main():
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE,(5,5))
 
     runLoop = True
+
+    cam = cameraLeft
+
     while runLoop:
+
+        if cam == cameraLeft:
+            cam = cameraRight
+            windowName= "Right"
+            xchgFileName = "xcghFileRight.txt"
+            iCam = 0
+        else:
+            cam = cameraLeft
+            windowName = "Left"
+            xchgFileName = "xcghFileLeft.txt"
+            iCam = 1
 
         # Get the latest image (the camera is set in 8-bit gray mode for speed of both
         # data transfer via USB and processing time)
@@ -205,11 +231,11 @@ def main():
 
         # The image is binary thresholded
         # If no threshold has been established yet, we apply Otsu's optimal threshold detection.    
-        if lightThreshold is None:
-            lightThreshold, imageBW = cv2.threshold(imageGray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
+        if lightThreshold[iCam] is None:
+            lightThreshold[iCam], imageBW = cv2.threshold(imageGray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
         else:
-            _, imageBW = cv2.threshold(imageGray, lightThreshold, 255, cv2.THRESH_BINARY)
-        showThreshold(imageGray,lightThreshold,(100,400),True)
+            _, imageBW = cv2.threshold(imageGray, lightThreshold[iCam], 255, cv2.THRESH_BINARY)
+        showThreshold(imageGray,lightThreshold[iCam],(100,400),True)
         # Find all contours in the image
         contours, _ = cv2.findContours(imageBW, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
         # Some contours may be square, others may be circles: get all of them into
@@ -267,19 +293,19 @@ def main():
                 # If light threshold decreases, the square area increases and the circle area decreases
                 if c[3]*1.99 > s[5]:
                 #if c[4]*2.50 > s[3]:
-                    if lightThreshold > 0:
-                        lightThreshold = lightThreshold-1
+                    if lightThreshold[iCam] > 0:
+                        lightThreshold[iCam] = lightThreshold[iCam]-1
                 else:
-                    if lightThreshold < 255:
-                        lightThreshold = lightThreshold+1
+                    if lightThreshold[iCam] < 255:
+                        lightThreshold[iCam] = lightThreshold[iCam]+1
         if maybeTarget is None:
             # We could not find any maybeTarget, i.e. any target
             # Therefore we adjust our binary threshold by lowering it by 10% and retry...
             # Once the threshold is too low, we restart from the beginning
-            lightThreshold = int(lightThreshold * 0.9)
-            if lightThreshold <= 1:
-                lightThreshold = None
-                utilities.sharePosition(nFrame,None,None,None,None,None,None)
+            lightThreshold[iCam] = int(lightThreshold[iCam] * 0.9)
+            if lightThreshold[iCam] <= 1:
+                lightThreshold[iCam] = None
+                utilities.sharePosition(xchgFileName,nFrame[iCam],None,None,None,None,None,None)
         else:
             # Finally we have a maybeTarget: our target in the image!
             # The maybeTarget is a square, defined by its 4 vertexes. For the projection algorithm to work properly,
@@ -308,14 +334,14 @@ def main():
             z = tVec[2,0]
             # Some lowpass filtering...
             if filterCoordinatesEnable:
-                avgX = x * alfa + (1-alfa) * avgX
-                avgY = y * alfa + (1-alfa) * avgY
-                avgZ = z * alfa + (1-alfa) * avgZ
+                avgX[iCam] = x * alfa + (1-alfa) * avgX[iCam]
+                avgY[iCam] = y * alfa + (1-alfa) * avgY[iCam]
+                avgZ[iCam] = z * alfa + (1-alfa) * avgZ[iCam]
             else:
-                avgX = x
-                avgY = y
-                avgZ = z
-            showCoordinates(imageGray, (avgX,avgY,avgZ), (100,100), subpixelAnalysysEnabled, showCoordinatesEnable)
+                avgX[iCam] = x
+                avgY[iCam] = y
+                avgZ[iCam] = z
+            showCoordinates(imageGray, (avgX[iCam],avgY[iCam],avgZ[iCam]), (100,100), subpixelAnalysysEnabled, showCoordinatesEnable)
             # Calculate the pitch, yaw, and roll angles
             # Pitch is rotation around x-axis, yaw is rotation around y-axis, and roll is rotation around z-axis
             # Step 1: convert the quaternion to a (3x3) rotation matrix
@@ -333,18 +359,18 @@ def main():
                 pitch_deg = -pitch_deg -180
             yaw_deg = np.rad2deg(yaw_rad)
             # Some lowpass filtering...
-            avgRoll = roll_deg * alfa + (1-alfa) * avgRoll
-            avgYaw = yaw_deg * alfa + (1-alfa) * avgYaw
-            avgPitch = pitch_deg * alfa + (1-alfa) * avgPitch
-            showAngles(imageGray, (avgRoll,avgPitch,avgYaw), (100,250), True)
+            avgRoll[iCam] = roll_deg * alfa + (1-alfa) * avgRoll[iCam]
+            avgYaw[iCam] = yaw_deg * alfa + (1-alfa) * avgYaw[iCam]
+            avgPitch[iCam] = pitch_deg * alfa + (1-alfa) * avgPitch[iCam]
+            showAngles(imageGray, (avgRoll[iCam],avgPitch[iCam],avgYaw[iCam]), (100,250), True)
             # Output real-time position information for other apps
-            utilities.sharePosition(nFrame,avgX,avgY,avgZ,avgRoll,avgPitch,avgYaw)
+            utilities.sharePosition(xchgFileName,nFrame[iCam],avgX[iCam],avgY[iCam],avgZ[iCam],avgRoll[iCam],avgPitch[iCam],avgYaw[iCam])
         
         # Graphic output... 
         showCross(imageGray, graphicShowCross) 
-        cv2.imshow('Window',imageGray)
-        nFrame = nFrame + 1
-        k = cv2.waitKey(10)
+        cv2.imshow(windowName,imageGray)
+        nFrame[iCam] = nFrame[iCam] + 1
+        k = cv2.waitKey(100)
         if k == utilities.Key.ESC:
             runLoop = False
         elif k == utilities.Key.S:
@@ -368,9 +394,11 @@ def main():
 
 
     # Close everything and shut down
-    cam.stop()
+    cameraLeft.stop()
+    cameraRight.stop()
     cv2.waitKey(1000)
-    cam.close()
+    cameraLeft.close()
+    cameraRight.close()
     cv2.destroyAllWindows()
 
 #------------------------------------------------------------------------

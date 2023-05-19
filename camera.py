@@ -14,19 +14,21 @@ import time
 class Camera:
 
     #-----------------------------------------------------
-    def __init__(self, width, height):
+    def __init__(self, serialNumber, width, height):
     #-----------------------------------------------------
         self.width = width
-        self.height = height
-        self.camera = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateFirstDevice())
+        self.height = height        
+        for i in pylon.TlFactory.GetInstance().EnumerateDevices():
+            if i.GetSerialNumber() == serialNumber:
+                info = i
+                break
+        self.camera  = pylon.InstantCamera(pylon.TlFactory.GetInstance().CreateDevice(info))
         self.camera.Open()
         self.camera.Width.SetValue(self.width)
         self.camera.Height.SetValue(self.height)
         self.camera.CenterX.SetValue(True)
         self.camera.CenterY.SetValue(True)
-        # =======>>>>> TODO: set the automatic gain mode
-        # ... I could not find the corresponding command... The only way so far is to use Pylon Viewer...
-        # self.camera.GainAuto.SetValue(GainAuto_Continuous)
+        self.camera.GainAuto.SetValue("Continuous")
         self.camera.StartGrabbing(pylon.GrabStrategy_LatestImageOnly)
         self.converter = pylon.ImageFormatConverter()
         self.converter.OutputPixelFormat = pylon.PixelType_Mono8

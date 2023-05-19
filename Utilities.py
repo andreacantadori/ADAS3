@@ -117,8 +117,8 @@ def buildRealTarget(w, h, d):
 #--------------------------------------------------------
 # FILE UTILITIES
 #--------------------------------------------------------
-def sharePosition(n,x,y,z,r,p,w):
-    file = open('xchgFile.txt', 'w')
+def sharePosition(f,n,x,y,z,r,p,w):
+    file = open(f, 'w')
     if x is None:
         file.write('#{:.0f} (-,-,-),(-,-,-)\n'.format(n))
     else:
