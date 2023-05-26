@@ -1,3 +1,4 @@
+import math
 
 class Key:
     # ASCII codes
@@ -119,8 +120,8 @@ def buildRealTarget(w, h, d):
 #--------------------------------------------------------
 def sharePosition(f,n,x,y,z,r,p,w):
     file = open(f, 'w')
-    if x is None:
-        file.write('#{:.0f} (-,-,-),(-,-,-)\n'.format(n))
-    else:
+    if x is not None:
         file.write('#{:.0f} ({:.0f},{:.0f},{:.0f}),({:.1f},{:.1f},{:.1f})'.format(n,x,y,z,r,p,w))
+    else:
+        file.write('#{:.0f} (-,-,-),(-,-,-)\n'.format(n))
     file.close()

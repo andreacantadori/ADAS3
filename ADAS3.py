@@ -9,6 +9,7 @@ import utilities
 from numpy import load
 from numpy import save
 from numpy import asarray
+import math
 
 #--------------------------------------------------------------------------------------------------
 def getTargetVertexesInClockwiseOrder(t):
@@ -57,19 +58,16 @@ def showCenter(img, pts, show):
             cv2.circle(img,(int(p[0][0]),int(p[0][1])),30,0,-1)
     return img
 #--------------------------------------------------------------------------------------------------
-def showCoordinates(img, coord, pos, sbp, show):
+def showCoordinates(img, camCoord, ADASCoord, pos, show):
 #--------------------------------------------------------------------------------------------------
     if show:
-        if sbp:
-            cv2.putText(img, "X,Y,Z (mm): {:.0f},{:.0f},{:.0f}, subpixel".format(coord[0],coord[1],coord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
-        else:
-            cv2.putText(img, "X,Y,Z (mm): {:.0f},{:.0f},{:.0f}".format(coord[0],coord[1],coord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+        cv2.putText(img, "cam:({:.0f},{:.0f},{:.0f}) ADAS:({:.0f},{:.0f},{:.0f})".format(camCoord[0],camCoord[1],camCoord[2],ADASCoord[0],ADASCoord[1],ADASCoord[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 2, 255, 2, cv2.LINE_4)
     return img
 #--------------------------------------------------------------------------------------------------
 def showAngles(img, angles, pos, show):
 #--------------------------------------------------------------------------------------------------
     if show:
-        cv2.putText(img, "Roll,Pitch,Yaw (deg): {:.1f},{:.1f},{:.1f}".format(angles[0],angles[1],angles[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+        cv2.putText(img, "Roll,Pitch,Yaw (deg): {:.1f},{:.1f},{:.1f}".format(angles[0],angles[1],angles[2]), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 2, 255, 2, cv2.LINE_4)
     return img
 #--------------------------------------------------------------------------------------------------
 def showCross(img, show):
@@ -82,7 +80,7 @@ def showCross(img, show):
 def showThreshold(img, thresh, pos, show):
 #--------------------------------------------------------------------------------------------------
     if show:
-        cv2.putText(img, "Thresh: {:.0f}".format(thresh), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 4, 255, 4, cv2.LINE_4)
+        cv2.putText(img, "Thresh: {:.0f}".format(thresh), (pos[0],pos[1]), cv2.FONT_HERSHEY_SIMPLEX, 2, 255, 2, cv2.LINE_4)
     return img
 
 #--------------------------------------------------------------------------------------------------
@@ -115,9 +113,11 @@ def main():
     graphicShowCross = False        # Call with True to display the white cross centered in the image
 
     # Load camera intrinsic matrix
-    M_K = load('./Support files/Camera/CameraMtx.npy')
+    M_KLeft = load('./Support files/Camera/CameraMtxLeft.npy')
+    M_KRight = load('./Support files/Camera/CameraMtxLeft.npy')
     # Load camera distortion matrix
-    M_DIST = load('./Support files/Camera/CameraDist.npy')
+    M_DISTLeft= load('./Support files/Camera/CameraDistLeft.npy')
+    M_DISTRight= load('./Support files/Camera/CameraDistLeft.npy')
     # ========>>>> TODO: Manage the cases of missing matrixes!
 
     # The real (i.e. in world coordinates) is a square of 200x200 mm
@@ -151,8 +151,10 @@ def main():
     # Just ignore if filterCoordinatesEnable is False
     alfa = 0.1
 
+    globalWidth = 4024
+    globalHeight = 2024 #3036
     # Create camera object (encapsulates pypylon) and set the camera to its maximum resolution
-    cameraLeft = camera.Camera('24686208',4024,3036)
+    cameraLeft = camera.Camera('24686208',globalWidth,globalHeight)
     # Start grabbing
     # Note that the camera.latestFrame method is asynchronous, i.e. it always
     # returns the latest available frame, so that image grabbing continues 
@@ -163,7 +165,7 @@ def main():
         sys.exit(1)
 
     # Create camera object (encapsulates pypylon) and set the camera to its maximum resolution
-    cameraRight = camera.Camera('24686187',4024,3036)
+    cameraRight = camera.Camera('24686187',globalWidth,globalHeight)
     # Start grabbing
     # Note that the camera.latestFrame method is asynchronous, i.e. it always
     # returns the latest available frame, so that image grabbing continues 
@@ -214,11 +216,15 @@ def main():
 
         if cam == cameraLeft:
             cam = cameraRight
+            M_K = M_KRight
+            M_DIST = M_DISTRight
             windowName= "Right"
             xchgFileName = "xcghFileRight.txt"
             iCam = 0
         else:
             cam = cameraLeft
+            M_K = M_KLeft
+            M_DIST = M_DISTLeft
             windowName = "Left"
             xchgFileName = "xcghFileLeft.txt"
             iCam = 1
@@ -235,7 +241,8 @@ def main():
             lightThreshold[iCam], imageBW = cv2.threshold(imageGray, 0, 255, cv2.THRESH_BINARY+cv2.THRESH_OTSU)
         else:
             _, imageBW = cv2.threshold(imageGray, lightThreshold[iCam], 255, cv2.THRESH_BINARY)
-        showThreshold(imageGray,lightThreshold[iCam],(100,400),True)
+        imageGray = cv2.rectangle(imageGray,(0,0),(2000,200),0,-1)
+        showThreshold(imageGray,lightThreshold[iCam],(100,150),True)
         # Find all contours in the image
         contours, _ = cv2.findContours(imageBW, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
         # Some contours may be square, others may be circles: get all of them into
@@ -341,7 +348,19 @@ def main():
                 avgX[iCam] = x
                 avgY[iCam] = y
                 avgZ[iCam] = z
-            showCoordinates(imageGray, (avgX[iCam],avgY[iCam],avgZ[iCam]), (100,100), subpixelAnalysysEnabled, showCoordinatesEnable)
+            alfa = math.radians(60)
+            CAMx = avgX[iCam]
+            CAMy = avgY[iCam]
+            CAMz = avgZ[iCam]
+            if cam == cameraLeft:
+                ADASx =  CAMx * math.sin(alfa) + CAMz * math.cos(alfa)
+                ADASy = -CAMx * math.cos(alfa) + CAMz * math.sin(alfa)
+                ADASz = CAMy
+            else:
+                ADASx = -CAMx * math.sin(alfa) + CAMz * math.cos(alfa)
+                ADASy =  CAMx * math.cos(alfa) + CAMz * math.sin(alfa)
+                ADASz = CAMy
+            showCoordinates(imageGray, (avgX[iCam],avgY[iCam],avgZ[iCam]),(ADASx,ADASy,ADASz), (100,50), showCoordinatesEnable)
             # Calculate the pitch, yaw, and roll angles
             # Pitch is rotation around x-axis, yaw is rotation around y-axis, and roll is rotation around z-axis
             # Step 1: convert the quaternion to a (3x3) rotation matrix
@@ -362,9 +381,9 @@ def main():
             avgRoll[iCam] = roll_deg * alfa + (1-alfa) * avgRoll[iCam]
             avgYaw[iCam] = yaw_deg * alfa + (1-alfa) * avgYaw[iCam]
             avgPitch[iCam] = pitch_deg * alfa + (1-alfa) * avgPitch[iCam]
-            showAngles(imageGray, (avgRoll[iCam],avgPitch[iCam],avgYaw[iCam]), (100,250), True)
+            showAngles(imageGray, (avgRoll[iCam],avgPitch[iCam],avgYaw[iCam]), (100,100), True)
             # Output real-time position information for other apps
-            utilities.sharePosition(xchgFileName,nFrame[iCam],avgX[iCam],avgY[iCam],avgZ[iCam],avgRoll[iCam],avgPitch[iCam],avgYaw[iCam])
+            utilities.sharePosition(xchgFileName,nFrame[iCam],ADASx,ADASy,ADASz,avgRoll[iCam],avgPitch[iCam],avgYaw[iCam])
         
         # Graphic output... 
         showCross(imageGray, graphicShowCross) 
